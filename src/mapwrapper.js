@@ -16,7 +16,7 @@ var GeoCodeAPI = function(opts) {
 		geocode: geocode
 	};
 };
-var MapWrapper = function(selector, addressArray,opts) {
+var googleMap = function(selector, addressArray,opts) {
 	// @see https://leafletjs.com/plugins.html#basemap-providers
 	var tileSrc = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 
@@ -25,7 +25,8 @@ var MapWrapper = function(selector, addressArray,opts) {
 		var defaults = {
 			infoWindow: {
 				open: true,
-				maxWidth: 300
+				maxWidth: 300,
+				template: '<div class="grid-x" style="width:325px;max-width:75vw;"><div class="cell small-6"><img src="{img}" alt="{imgalt}" style="max-width:130px;height:auto;" /></div><div class="cell auto"><p><strong>{title}</strong><br/>{address}</p><p class="small button-group"><a href="https://maps.google.com/maps?saddr=current+location&daddr={address}" target="_blank" class="button small secondary">Directions</a><a href="{url}" class="button primary small">View Details</a></p></div></div>'
 			},
 			zoomLevel: 12,
 			markerOpts: {},
@@ -61,6 +62,8 @@ var MapWrapper = function(selector, addressArray,opts) {
 			};
 			self.map = L.map(self.mapSelector, mapOpts).setView(self.options.center, self.options.zoomLevel);
 
+			// add tile layer
+			// @see https://leafletjs.com/examples/quick-start/
 			L.tileLayer(tileSrc, {
 					attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
 					maxZoom: 14
@@ -71,32 +74,30 @@ var MapWrapper = function(selector, addressArray,opts) {
 
 			//loop through array of addresses, get the lat/longitude for each.
 			//OR, if we already have lat/long, proceed to put a marker on the map.
-			self.addresses.forEach(function(item) {
-				//if lat/lon exists and is real number
-				if (typeof item.lat !== "undefined" && item.lng !== "") {
-
-					//update - make sure they don't stay strings!
-					item.lat = parseFloat(item.lat);
-					item.lng = parseFloat(item.lng);
-
-					var latlngObj = {lat:item.lat,lng:item.lng};
-					self.pinAddress(latlngObj,item);
-				} else {//else get lat/long
-					self.geoCodeIt(item, function(results) {
-						if ( results.success ) {
-							self.pinAddress(results.results[0].location, item);
+			self.addresses.forEach(self.pinOrGeocode);
+			return this;
+		};
+		this.pinOrGeocode = function(item) {
+			//if lat/lon exists and is real number
+			if (typeof item.lat !== "undefined" && item.lng !== "") {
+				//update - make sure they don't stay strings!
+				item.lat = parseFloat(item.lat);
+				item.lng = parseFloat(item.lng);
+				self.pinAddress({lat:item.lat,lng:item.lng},item);
+			} else {//else get lat/long
+				self.geoCodeIt(item, function(results) {
+					if ( results.success ) {
+						self.pinAddress(results.results[0].location, item);
+					} else {
+						//possibly a bad latitude/longitude
+						if ( results.hasOwnProperty("errors") && result.errors.length ) {
+							console.warn("Geocode was not successful for the following reason: " + JSON.stringify(results.errors), item);
 						} else {
-							//possibly a bad latitude/longitude
-							if ( results.hasOwnProperty("errors") && result.errors.length ) {
-								console.warn("Geocode was not successful for the following reason: " + JSON.stringify(results.errors), item);
-							} else {
-								console.warn("Geocode was not successful, sorry.", item);
-							}
+							console.warn("Geocode was not successful, sorry.", item);
 						}
-					});
-			 	}
-
-			}); //end forEach
+					}
+				});
+			}
 		};
 		this.geoCodeIt = function(item, callback) {
 			var self = this;
@@ -168,36 +169,12 @@ var MapWrapper = function(selector, addressArray,opts) {
 
 		};
 		this.getWindowHTML = function(addressObj) {
-			var detailsBtnHTML = '',
-				windowHTML = '',
-				imgHTML = '',
-				infWindowTemplate = '<div class="grid-x" style="width:325px;max-width:75vw;">{imgHTML}<div class="cell auto"><p><strong>{title}</strong><br/>{address}</p><p class="small button-group"><a href="https://maps.google.com/maps?saddr=current+location&daddr={address}" target="_blank" class="button small secondary">Directions</a>{detailsLink}</p></div></div>';
-
-			if (typeof addressObj.url === "string") {
-				detailsBtnHTML = '<a href="{url}" class="button primary small">View Details</a>';
+			var windowHTML = this.options.infoWindow.template;
+			for ( var key in addressObj ) {
+				windowHTML = windowHTML.replace('{' + key + '}', addressObj[key]);
 			}
-			if (typeof addressObj.img === "string" && addressObj.img.length > 0) {
-				imgHTML = '<div class="cell small-6">';
-				if (typeof addressObj.url === "string") { imgHTML += '<a href="{url}">'; }
-				imgHTML += '<img src="{img}" alt="{imgalt}" style="max-width:130px;height:auto;" />';
-				if (typeof addressObj.url === "string") { imgHTML += '</a>'; }
-				imgHTML += '</div>';
-			}
-			windowHTML = infWindowTemplate.replace(/\{address\}/gi,addressObj.address).replace(/\{title\}/gi,addressObj.title);
-			windowHTML = windowHTML.replace(/\{detailsLink\}/gi,detailsBtnHTML);
-			windowHTML = windowHTML.replace(/\{imgHTML\}/gi,imgHTML);
-			windowHTML = windowHTML.replace(/\{img\}/gi,addressObj.img);
-			windowHTML = windowHTML.replace(/\{imgalt\}/gi,addressObj.imgalt);
-			windowHTML = windowHTML.replace(/\{url\}/gi,addressObj.url);
 			return windowHTML;
 		};
-
   };
-
-	//create new object
-	var objInstance = new mapObj(selector);
-	objInstance.initialize();
-
-
-	return objInstance;
+	return new mapObj(selector).initialize();
 };
