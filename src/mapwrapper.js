@@ -16,7 +16,7 @@ var GeoCodeAPI = function(opts) {
 		geocode: geocode
 	};
 };
-var googleMap = function(selector, addressArray,opts) {
+var MapWrap = function(selector, addressArray,opts) {
 	// @see https://leafletjs.com/plugins.html#basemap-providers
 	var tileSrc = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 
@@ -62,6 +62,10 @@ var googleMap = function(selector, addressArray,opts) {
 			};
 			self.map = L.map(self.mapSelector, mapOpts).setView(self.options.center, self.options.zoomLevel);
 
+			// init map bounds
+			self.bounds = L.latLngBounds( self.options.center );
+			console.info( self );
+
 			// add tile layer
 			// @see https://leafletjs.com/examples/quick-start/
 			L.tileLayer(tileSrc, {
@@ -74,30 +78,29 @@ var googleMap = function(selector, addressArray,opts) {
 
 			//loop through array of addresses, get the lat/longitude for each.
 			//OR, if we already have lat/long, proceed to put a marker on the map.
-			self.addresses.forEach(self.pinOrGeocode);
-			return this;
-		};
-		this.pinOrGeocode = function(item) {
-			//if lat/lon exists and is real number
-			if (typeof item.lat !== "undefined" && item.lng !== "") {
-				//update - make sure they don't stay strings!
-				item.lat = parseFloat(item.lat);
-				item.lng = parseFloat(item.lng);
-				self.pinAddress({lat:item.lat,lng:item.lng},item);
-			} else {//else get lat/long
-				self.geoCodeIt(item, function(results) {
-					if ( results.success ) {
-						self.pinAddress(results.results[0].location, item);
-					} else {
-						//possibly a bad latitude/longitude
-						if ( results.hasOwnProperty("errors") && result.errors.length ) {
-							console.warn("Geocode was not successful for the following reason: " + JSON.stringify(results.errors), item);
+			self.addresses.forEach(function(item) {
+				//if lat/lon exists and is real number
+				if (typeof item.lat !== "undefined" && item.lng !== "") {
+					//update - make sure they don't stay strings!
+					item.lat = parseFloat(item.lat);
+					item.lng = parseFloat(item.lng);
+					self.pinAddress({lat:item.lat,lng:item.lng},item);
+				} else {//else get lat/long
+					self.geoCodeIt(item, function(results) {
+						if ( results.success ) {
+							self.pinAddress(results.results[0].location, item);
 						} else {
-							console.warn("Geocode was not successful, sorry.", item);
+							//possibly a bad latitude/longitude
+							if ( results.hasOwnProperty("errors") && result.errors.length ) {
+								console.warn("Geocode was not successful for the following reason: " + JSON.stringify(results.errors), item);
+							} else {
+								console.warn("Geocode was not successful, sorry.", item);
+							}
 						}
-					}
-				});
-			}
+					});
+				}
+			});
+			return this;
 		};
 		this.geoCodeIt = function(item, callback) {
 			var self = this;
@@ -114,6 +117,10 @@ var googleMap = function(selector, addressArray,opts) {
 					callback(response.responseText);
 				}
 			});
+		};
+		this.extendBounds = function(latlng) {
+			this.bounds.extend(latlng);
+			this.map.fitBounds( this.bounds );
 		};
 		this.pinAddress = function(latlng, addressObj) {
 			var self = this,
@@ -146,14 +153,17 @@ var googleMap = function(selector, addressArray,opts) {
 				return markerOptions;
 			};
 			// @see https://leafletjs.com/reference-1.3.4.html#marker
-			var marker = L.marker([latlng.lat,latlng.lng]).addTo(self.map);
+			var marker = L.marker( latlng ).addTo(self.map);
 			var popupOpts = {
 				maxWidth: self.options.infoWindow.maxWidth
 			};
 			// @see https://leafletjs.com/reference-1.3.4.html#popup
 			var popup = L.popup(popupOpts, marker).setContent( self.getWindowHTML(addressObj) );
 			// @see https://leafletjs.com/reference-1.3.4.html#layer-bindpopup
-			marker.bindPopup( popup );
+			marker.bindPopup( popup ).on("popupopen", function(e) {
+				// pan map to center the marker that was just clicked.
+				self.map.panTo( e.target.getLatLng() );
+			});
 
 			if (self.options.infoWindow.open) {
 				//open when loaded
@@ -164,8 +174,8 @@ var googleMap = function(selector, addressArray,opts) {
 			self.markerMap[addressObj.id] = marker;
 			self.infoWindows[addressObj.id] = popup;
 
-			//save the value we want as the center.
-			//self.bounds.extend(latlng);
+			// make sure the map expands to fit this pin!
+			self.extendBounds( latlng );
 
 		};
 		this.getWindowHTML = function(addressObj) {
